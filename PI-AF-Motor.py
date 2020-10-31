@@ -2,6 +2,35 @@ import RPi.GPIO as gpio
 import time
 from time import sleep
 
+
+# To create a PWM instance:
+# p = GPIO.PWM(channel, frequency)
+# To start PWM:
+# p.start(dc)   # where dc is the duty cycle (0.0 <= dc <= 100.0)
+#
+# To change the frequency:
+# p.ChangeFrequency(freq)   # where freq is the new frequency in Hz
+#
+# To change the duty cycle:
+# p.ChangeDutyCycle(dc)  # where 0.0 <= dc <= 100.0
+# To stop PWM:
+# p.stop()
+
+
+MOTOR12_64KHZ = 64000   # Frequency in Hz
+MOTOR12_39KHZ = 39000   # Frequency in Hz
+MOTOR34_64KHZ = 64000   # Frequency in Hz
+MOTOR34_39KHZ = 39000   # Frequency in Hz
+
+# PWM rate for DC motors.
+DC_MOTOR_PWM_FREQ = MOTOR34_64KHZ
+
+# PWM rate for DC motors.
+STEPPER1_PWM_RATE = MOTOR12_39KHZ
+STEPPER2_PWM_RATE = MOTOR34_39KHZ
+
+MICROSTEPS = 16
+
 MOTOR1 = 1
 MOTOR2 = 2
 MOTOR3 = 3
@@ -9,44 +38,80 @@ MOTOR4 = 4
 
 FORWARD = 1
 BACKWARD = 2
-BRAKE = 3
-RELEASE = 4 # Não utilizo
+BRAKE = 3       # Não utilizo
+RELEASE = 4
 
-def BIT(bit): return (1<<(bit))
+# Constants that the user passes in to the stepper calls
+SINGLE = 1
+DOUBLE = 2
+INTERLEAVE = 3
+MICROSTEP = 4
 
-class Motor():
-    latch_state = 0 << 8
+# Constants that the user passes in to the stepper calls
+SINGLE = 1
+DOUBLE = 2
+INTERLEAVE = 3
+MICROSTEP = 4
 
-    MOTORDATA=10
-    MOTORCLK=18
-    MOTORLATCH=8
-    MOTORENABLE=22
+# RPI Pins Used to interface to 74HCT595 of the AF Motor Shield
+# Have to change to map GPIO available pins
+MOTORLATCH = 8
+MOTORDATA = 10
+MOTORCLK = 18
+MOTORENABLE = 22
 
-    MOTOR1PWM=26
-    MOTOR2PWM=24
+# HW PWM phisical pins 12, 13, 18, 19
+# SW PWM any pins
+MOTOR1PWM = 26
+MOTOR2PWM = 24
+#MOTOR3PWM = 12
+#MOTOR4PWM = 16
 
-            #define MOTOR1_A 2
-            #define MOTOR1_B 3
-            #define MOTOR2_A 1
-            #define MOTOR2_B 4
-            #define MOTOR4_A 0   ===> No diagrama este é o 3_A
-            #define MOTOR4_B 6   ===> No diagrama este é o 3_B
-            #define MOTOR3_A 5   ===> No diagrama este é o 4_A
-            #define MOTOR3_B 7   ===> No diagrama este é o 4_B
-            # Além disso a ordem aparece trocada (primeiro o 4 e depois o 3???
+M1={'A': 2, 'B': 3}
+M2={'A': 1, 'B': 4}
+M3={'A': 0, 'B': 6}     # Utilizo a numeração do esquema do circuito
+M4={'A': 5, 'B': 7}     # utilizo a numeração do esquema do circuito
 
-    M1={'A': 2, 'B': 3}
-    M2={'A': 1, 'B': 4}
-    M3={'A': 0, 'B': 6}     # Utilizo a numeração do esquema do circuito
-    M4={'A': 5, 'B': 7}     # utilizo a numeração do esquema do circuito
+latch_state = 0
 
+def BIT(bit): return (1 << (bit))
+def BV(bit): return (1 << (bit))
+
+def initPWM1():
+    gpio.setup(MOTOR1PWM,gpio.OUT)
+    gpio.output(MOTOR1PWM,gpio.LOW)
+
+def setPWM1(freq):
+    m1_pwm=gpio.PWM(MOTOR1PWM, freq)
+
+def initPWM2():
+    gpio.setup(MOTOR2PWM,gpio.OUT)
+    gpio.output(MOTOR2PWM,gpio.LOW)
+
+def setPWM2(freq):
+    gpio.PWM(MOTOR2PWM, freq)
+
+def initPWM3():
+    gpio.setup(MOTOR3PWM,gpio.OUT)
+    gpio.output(MOTOR3PWM,gpio.LOW)
+
+def setPWM3(freq):
+    gpio.PWM(MOTOR3PWM, freq)
+
+def initPWM4():
+    gpio.setup(MOTOR4PWM,gpio.OUT)
+    gpio.output(MOTOR4PWM,gpio.LOW)
+
+def setPWM4(freq):
+    gpio.PWM(MOTOR4PWM, freq)
+
+class AFMotorController:
+#    TimerInitialized #Is this realy necessary?
     def __init__(self):
-        self.setupBoard()
-        self.pause=0
-        self.latch_state=0
-        self.latchTX()
+#        self.TimerInitialized = False
+        pass
 
-    def setupBoard(self):
+    def enable(self):
         gpio.setup(self.MOTORDATA,gpio.OUT)
         gpio.output(self.MOTORDATA,gpio.LOW)
         gpio.setup(self.MOTORCLK,gpio.OUT)
@@ -55,71 +120,162 @@ class Motor():
         gpio.output(self.MOTORLATCH,gpio.HIGH)
         gpio.setup(self.MOTORENABLE,gpio.OUT)
         gpio.output(self.MOTORENABLE,gpio.LOW)
-        gpio.setup(self.MOTOR1PWM,gpio.OUT)
-        gpio.output(self.MOTOR1PWM,gpio.LOW)
-        gpio.setup(self.MOTOR2PWM,gpio.OUT)
-        gpio.output(self.MOTOR2PWM,gpio.LOW)
-        self.m1_pwm=gpio.PWM(self.MOTOR1PWM, 50)
-        self.m2_pwm=gpio.PWM(self.MOTOR2PWM, 50)
+        
+        latch_state = 0
 
-    def latchTX(self):
+        self.latch_tx()
+
+        gpio.output(self.MOTORENABLE,gpio.LOW)
+
+
+    def latch_tx(self):
         gpio.output(self.MOTORLATCH, gpio.LOW)
-        sleep(self.pause)                             # AUTORECRIAÇÃO
+#        sleep(self.pause)   # Eventualmente não será necessário
         gpio.output(self.MOTORDATA, gpio.LOW)
 
         for i in range(8):
-            sleep(self.pause)
+#            sleep(self.pause)   # Eventualmente não será necessário
             gpio.output(self.MOTORCLK, gpio.LOW)
-            if(self.latch_state & (1<<(7-i))):
+            if(self.latch_state & BV(7-i)):
                 gpio.output(self.MOTORDATA, gpio.HIGH)
             else:
                 gpio.output(self.MOTORDATA, gpio.LOW)
-            sleep(self.pause)
+#            sleep(self.pause)   # Eventualmente não será necessário
             gpio.output(self.MOTORCLK, gpio.HIGH)
         gpio.output(self.MOTORLATCH, gpio.HIGH)
 
-    def DCMotorRun(self, motornum, cmd):
+MC=AFMotorController()
+
+class AF_DCMotor:
+    motornum = 1
+    pwmfreq = 0
+
+    def __init__(self, motornum, freq = DC_MOTOR_PWM_FREQ):
+        self.motornum = num
+        self.pwmfreq = freq
+
+        MC.enable()
+
+        if(num==1):
+            latch_state &= ~BV(M1['A']) & ~BV(M1['B'])
+            MC.latch_tx()
+            initPWM1(freq)
+        elif (num == 2):
+            latch_state &= ~BV(M2['A']) & ~BV(M2['B']) 
+            MC.latch_tx()
+            initPWM2(freq)
+        elif (num == 3):
+            latch_state &= ~BV(M3['A']) & ~BV(M3['B']) 
+            MC.latch_tx()
+            initPWM3(freq)
+        elif (num == 4):
+            latch_state &= ~BV(M4['A']) & ~BV(M4['B']) 
+            MC.latch_tx()
+            initPWM4(freq)
+
+    def run(self, cmd):
         a = 0
         b = 0
 
-        if (motornum == 1):   a = self.M1['A']; b = self.M1['B']
-        elif (motornum == 2): a = self.M2['A']; b = self.M2['B']
-        elif (motornum == 3): a = self.M3['A']; b = self.M3['B']
-        elif (motornum == 4): a = self.M4['A']; b = self.M4['B']
+        if (self.motornum == 1):   a = self.M1['A']; b = self.M1['B']
+        elif (self.motornum == 2): a = self.M2['A']; b = self.M2['B']
+        elif (self.motornum == 3): a = self.M3['A']; b = self.M3['B']
+        elif (self.motornum == 4): a = self.M4['A']; b = self.M4['B']
         else: return;
 
         if (cmd == FORWARD):
-            self.latch_state |=  BIT(a)
-            self.latch_state &= ~BIT(b)
+            self.latch_state |=  BV(a)
+            self.latch_state &= ~BV(b)
         elif (cmd == BACKWARD):
-            self.latch_state &= ~BIT(a)
-            self.latch_state |=  BIT(b)
-#        elif (cmd == BREAK):
-#            self.latch_state &=  BIT(a)
-#            self.latch_state &=  BIT(b)
+            self.latch_state &= ~BV(a)
+            self.latch_state |=  BV(b)
         elif (cmd == RELEASE):
             self.latch_state &= ~BIT(a)
             self.latch_state &= ~BIT(b)
-        else: return;
-        self.latchTX();
+        else: return
+        self.latch_tx()
 
-    def RunFW(self):
-        self.DCMotorRun(MOTOR1, FORWARD) 
-        self.DCMotorRun(MOTOR2, FORWARD)
-        self.m1_pwm.start(0)
-        self.m2_pwm.start(0)
-        for i in range(0,101,5):
-            self.m1_pwm.ChangeDutyCycle(i)
-            self.m2_pwm.ChangeDutyCycle(i)
-            sleep(0.1)
-        sleep(5)
-        for i in range(100,-1,-5):
-            self.m1_pwm.ChangeDutyCycle(i)
-            self.m2_pwm.ChangeDutyCycle(i)
-            sleep(0.1)
-        self.DCMotorRun(MOTOR1, RELEASE) 
-        self.DCMotorRun(MOTOR2, RELEASE)
+    def setSpeed(self, speed):
+        if(self.motornum == 1):
+            setPWM1(speed)
+        elif(self.motornum == 2):
+            setPWM2(speed)
+        elif(self.motornum == 3):
+            setPWM3(speed)
+        elif(self.motornum == 4):
+            setPWM4(speed)
+     
+class AF_Stepper:
+    refsteps = 0        # Steps per revolution
+    steppernum = 0
+    usperstep = 0
+    steppingcounter = 0
+    currentstep = 0
 
+    def __init__(self, steps, num):
+        MC.enable()
+
+        self.revsteps = steps
+        self.steppernum = num
+        self.currentstep = 0
+
+        if(self.steppernum == 1):
+            latch_state &= ~_BV(MOTOR1_A) & ~_BV(MOTOR1_B) & ~_BV(MOTOR2_A) & ~_BV(MOTOR2_B); // all motor pins to 0
+            MC.latch_tx()
+
+            gpio.setup(MOTOR1PWM,gpio.OUT)
+            gpio.setup(MOTOR2PWM,gpio.OUT)
+            gpio.output(MOTOR1PWM,gpio.HIGH)
+            gpio.output(MOTOR2PWM,gpio.HIGH)
+
+            # use PWM for microstepping support
+            initPWM1(STEPPER1_PWM_RATE)
+            initPWM2(STEPPER1_PWM_RATE)
+            setPWM1(255)
+            setPWM2(255)
+        elif(self.steppernum == 2):
+            latch_state &= ~_BV(MOTOR3_A) & ~_BV(MOTOR3_B) & ~_BV(MOTOR4_A) & ~_BV(MOTOR4_B); // all motor pins to 0
+            MC.latch_tx()
+
+            gpio.setup(MOTOR3PWM,gpio.OUT)
+            gpio.setup(MOTOR4PWM,gpio.OUT)
+            gpio.output(MOTOR3PWM,gpio.HIGH)
+            gpio.output(MOTOR4PWM,gpio.HIGH)
+
+            # use PWM for microstepping support
+            initPWM3(STEPPER2_PWM_RATE)
+            initPWM4(STEPPER2_PWM_RATE)
+            setPWM3(255)
+            setPWM4(255)
+
+
+    def step(self, steps, dir, style = SINGLE):
+        pass
+
+    def setSpeed(self, rpm):
+        self.usperstep = 60000000 / (self.revsteps * rpm);
+        self.steppingcounter = 0
+
+    def onesetp(self, dir, style):
+        pass
+
+    def release(self):
+        if (self.steppernum == 1):
+            # all motor pins to 0
+            latch_state &= ~BV(M1['A']) & ~BV(M1['B']) & ~BV(M2['A']) & ~BV(M2['B'])
+        elif (steppernum == 2) :
+            # all motor pins to 0
+            latch_state &= ~BV(M3['A']) & ~BV(M3['B']) & ~BV(M4['A']) & ~BV(M4['B'])
+        MC.latch_tx()
+
+def getlatchstate():
+    pass
+
+def main():
+    mot1 = AF_DCMotor(1, 16000)
+    mot1.run(FORWARD)
+    sleep(5)
+    mot1.run(RELEASE)
 #   gpio.cleanup()
 
 if __name__=="__main__":
