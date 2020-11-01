@@ -220,7 +220,7 @@ class AF_Stepper:
         self.currentstep = 0
 
         if(self.steppernum == 1):
-            latch_state &= ~_BV(MOTOR1_A) & ~_BV(MOTOR1_B) & ~_BV(MOTOR2_A) & ~_BV(MOTOR2_B); // all motor pins to 0
+            latch_state &= ~_BV(MOTOR1_A) & ~_BV(MOTOR1_B) & ~_BV(MOTOR2_A) & ~_BV(MOTOR2_B) # all motor pins to 0
             MC.latch_tx()
 
             gpio.setup(MOTOR1PWM,gpio.OUT)
@@ -234,7 +234,7 @@ class AF_Stepper:
             setPWM1(255)
             setPWM2(255)
         elif(self.steppernum == 2):
-            latch_state &= ~_BV(MOTOR3_A) & ~_BV(MOTOR3_B) & ~_BV(MOTOR4_A) & ~_BV(MOTOR4_B); // all motor pins to 0
+            latch_state &= ~_BV(MOTOR3_A) & ~_BV(MOTOR3_B) & ~_BV(MOTOR4_A) & ~_BV(MOTOR4_B) # all motor pins to 0
             MC.latch_tx()
 
             gpio.setup(MOTOR3PWM,gpio.OUT)
@@ -275,7 +275,7 @@ def main():
     mot1 = AF_DCMotor(1, 16000)
     mot1.run(FORWARD)
     sleep(5)
-    mot1.run(RELEASE)
+mot1.run(RELEASE)
 #   gpio.cleanup()
 
 if __name__=="__main__":
