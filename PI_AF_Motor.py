@@ -69,14 +69,16 @@ MOTOR2PWM = 24
 
 M1={'A': 2, 'B': 3}
 M2={'A': 1, 'B': 4}
-M3={'A': 0, 'B': 6}     # Utilizo a numeração do esquema do circuito
-M4={'A': 5, 'B': 7}     # utilizo a numeração do esquema do circuito
+# There is a mismatch between the schematich and the AF-Motor.h
+# I use the schemetic numbering for Motor 3 and Motor 4, until I test it.
+M3={'A': 0, 'B': 6}
+M4={'A': 5, 'B': 7}
 
 latch_state = 0
 
 gpio.setmode(gpio.BOARD)
 
-def BIT(bit): return (1 << (bit))
+#def BIT(bit): return (1 << (bit))
 def BV(bit): return (1 << (bit))
 
 def initPWM1():
@@ -84,7 +86,7 @@ def initPWM1():
     gpio.output(MOTOR1PWM,gpio.LOW)
 
 def setPWM1(freq):
-    m1_pwm=gpio.PWM(MOTOR1PWM, freq)
+    gpio.PWM(MOTOR1PWM, freq)
 
 def initPWM2():
     gpio.setup(MOTOR2PWM,gpio.OUT)
@@ -108,10 +110,10 @@ def setPWM4(freq):
     gpio.PWM(MOTOR4PWM, freq)
 
 class AFMotorController:
-#    TimerInitialized #Is this realy necessary?
     global latch_state
+#    pause=0
+
     def __init__(self):
-#        self.TimerInitialized = False
         pass
 
     def enable(self):
@@ -168,16 +170,15 @@ class AF_DCMotor:
             latch_state &= ~BV(M1['A']) & ~BV(M1['B'])
             MC.latch_tx()
             initPWM1()
-#            self.pwm_motor = gpio.PWM(MOTOR1PWM, freq)
-        elif (num == 2):
+        elif (motornum == 2):
             latch_state &= ~BV(M2['A']) & ~BV(M2['B']) 
             MC.latch_tx()
             initPWM2()
-        elif (num == 3):
+        elif (motornum == 3):
             latch_state &= ~BV(M3['A']) & ~BV(M3['B']) 
             MC.latch_tx()
             initPWM3()
-        elif (num == 4):
+        elif (motornum == 4):
             latch_state &= ~BV(M4['A']) & ~BV(M4['B']) 
             MC.latch_tx()
             initPWM4()
@@ -200,14 +201,13 @@ class AF_DCMotor:
             latch_state &= ~BV(a)
             latch_state |=  BV(b)
         elif (cmd == RELEASE):
-            latch_state &= ~BIT(a)
-            latch_state &= ~BIT(b)
+            latch_state &= ~BV(a)
+            latch_state &= ~BV(b)
         else: return
         MC.latch_tx()
 
     def setSpeed(self, speed):
         if(self.motornum == 1):
-#            self.pwm_motor.start(speed)
             setPWM1(speed)
         elif(self.motornum == 2):
             setPWM2(speed)
@@ -215,7 +215,12 @@ class AF_DCMotor:
             setPWM3(speed)
         elif(self.motornum == 4):
             setPWM4(speed)
-     
+ 
+###########################################################
+# Need to Work on this. It hasn't been tested yet
+# Neet to understand how the stepper motors work, first
+###########################################################
+
 class AF_Stepper:
     refsteps = 0        # Steps per revolution
     steppernum = 0
@@ -286,8 +291,10 @@ def getlatchstate():
 
 def main():
     mot1 = AF_DCMotor(1, 100)
-    mot1.run(FORWARD)
-    sleep(5)
+    mot2 = AF_DCMotor(1, 100)
+    #mot1.run(FORWARD)
+    #sleep(5)
+    mot1.run(RELEASE)
     mot1.run(RELEASE)
     gpio.cleanup()
 
