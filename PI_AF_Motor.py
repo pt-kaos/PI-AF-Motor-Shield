@@ -30,6 +30,7 @@ STEPPER1_PWM_RATE = MOTOR12_39KHZ
 STEPPER2_PWM_RATE = MOTOR34_39KHZ
 
 MICROSTEPS = 16
+microstepcurve=[0, 25, 50, 74, 98, 120, 141, 162, 180, 197, 212, 225, 236, 244, 250, 253, 255]
 
 MOTOR1 = 1
 MOTOR2 = 2
@@ -40,12 +41,6 @@ FORWARD = 1
 BACKWARD = 2
 BRAKE = 3       # Não utilizo
 RELEASE = 4
-
-# Constants that the user passes in to the stepper calls
-SINGLE = 1
-DOUBLE = 2
-INTERLEAVE = 3
-MICROSTEP = 4
 
 # Constants that the user passes in to the stepper calls
 SINGLE = 1
@@ -139,17 +134,17 @@ class AFMotorController:
         global latch_state
 
         gpio.output(MOTORLATCH, gpio.LOW)
-#        sleep(self.pause)   # Eventualmente não será necessário
+#        sleep(self.pause)   # Don't see the need for this
         gpio.output(MOTORDATA, gpio.LOW)
 
         for i in range(8):
-#            sleep(self.pause)   # Eventualmente não será necessário
+#            sleep(self.pause)   # Don't see the need for this
             gpio.output(MOTORCLK, gpio.LOW)
             if(latch_state & BV(7-i)):
                 gpio.output(MOTORDATA, gpio.HIGH)
             else:
                 gpio.output(MOTORDATA, gpio.LOW)
-#            sleep(self.pause)   # Eventualmente não será necessário
+#            sleep(self.pause)   # Don't see the need for this
             gpio.output(MOTORCLK, gpio.HIGH)
         gpio.output(MOTORLATCH, gpio.HIGH)
 
@@ -238,17 +233,18 @@ class AF_Stepper:
         self.currentstep = 0
 
         if(self.steppernum == 1):
-            latch_state &= ~_BV(MOTOR1_A) & ~_BV(MOTOR1_B) & ~_BV(MOTOR2_A) & ~_BV(MOTOR2_B) # all motor pins to 0
-            MC.latch_tx()
+            latch_state &= ~BV(M1['A']) & ~BV(M1['B']) & ~BV(M2['A']) & ~BV(M2['B']) # all motor pins to 0
+            self.latch_tx()
 
+            # Enable both H bridges
             gpio.setup(MOTOR1PWM,gpio.OUT)
             gpio.setup(MOTOR2PWM,gpio.OUT)
             gpio.output(MOTOR1PWM,gpio.HIGH)
             gpio.output(MOTOR2PWM,gpio.HIGH)
 
             # use PWM for microstepping support
-            initPWM1(STEPPER1_PWM_RATE)
-            initPWM2(STEPPER1_PWM_RATE)
+#            initPWM1(STEPPER1_PWM_RATE)
+#            initPWM2(STEPPER1_PWM_RATE)
             setPWM1(255)
             setPWM2(255)
         elif(self.steppernum == 2):
@@ -261,21 +257,167 @@ class AF_Stepper:
             gpio.output(MOTOR4PWM,gpio.HIGH)
 
             # use PWM for microstepping support
-            initPWM3(STEPPER2_PWM_RATE)
-            initPWM4(STEPPER2_PWM_RATE)
+#            initPWM3(STEPPER2_PWM_RATE)
+#            initPWM4(STEPPER2_PWM_RATE)
             setPWM3(255)
             setPWM4(255)
 
+    def latch_tx(self):
+        global latch_state
 
-    def step(self, steps, dir, style = SINGLE):
-        pass
+        gpio.output(MOTORLATCH, gpio.LOW)
+        gpio.output(MOTORDATA, gpio.LOW)
+
+        for i in range(8):
+            gpio.output(MOTORCLK, gpio.LOW)
+            if(latch_state & BV(7-i)):
+                gpio.output(MOTORDATA, gpio.HIGH)
+            else:
+                gpio.output(MOTORDATA, gpio.LOW)
+            gpio.output(MOTORCLK, gpio.HIGH)
+
+    def step(self, steps, direction, style = SINGLE):
+        uspers = usperstep
+        ret = 0
+        if (style == INTERLEAVE):
+            uspers /=2
+        elif (style == MICROSTEP):
+            uspers /= MICROSTEPS 
+            steps *= MICROSTEPS
+        while (steps-=1):
+            ret=onestep(direction, style)
+            sleep(uspers/1000)
+            steppingcounter += (uspers % 1000)
+            if (steppingcounter >=1000):
+                sleep(1)
+                steppingcounter -= 1000
+        if (style == MICROSTEP):
+            while ((ret!=0) && (ret != MICROSTEPS)):
+                ret = onestep(direction, style)
+                delay(uspers/1000)
+                steppingcounter += (uspers % 1000)
+                if (steppingcounter >= 1000):
+                    sleep(1)
+                    steppingcounter-=1000
 
     def setSpeed(self, rpm):
         self.usperstep = 60000000 / (self.revsteps * rpm);
         self.steppingcounter = 0
 
-    def onesetp(self, dir, style):
-        pass
+    def onestep(self, direction, style):
+        a=b=c=d=0
+        ocra = ocrb = 255;
+
+        if (steppernum == 1):
+            a = BV(M1['A'])
+            b = BV(M2['A'])
+            c = BV(M1['B'])
+            d = BV(M2['B'])
+        elif (steppernum == 2):
+            a = BV(M3['A'])
+            b = BV(M4['A'])
+            c = BV(M3['B'])
+            d = BV(M4['B'])
+        else:
+            return 0
+
+        # next determine what sort of stepping procedure we're up to
+        if (style == SINGLE): 
+            if ((currentstep/(MICROSTEPS/2)) % 2): #we're at an odd step, weird
+                if (direction == FORWARD):
+	            currentstep += MICROSTEPS/2
+                else:
+	            currentstep -= MICROSTEPS/2
+            else:                               # go to the next even step
+                if (direction == FORWARD):
+	            currentstep += MICROSTEPS
+                else:
+	            currentstep -= MICROSTEPS
+        elif (style == DOUBLE):
+            if (! (currentstep/(MICROSTEPS/2) % 2)): # we're at an even step, weird
+                if (direction == FORWARD):
+	            currentstep += MICROSTEPS/2
+                else
+	            currentstep -= MICROSTEPS/2
+            else:                               # go to the next odd step
+                if (direction == FORWARD):
+	            currentstep += MICROSTEPS
+                else:
+	            currentstep -= MICROSTEPS
+        elif (style == INTERLEAVE):
+            if (direction == FORWARD):
+                currentstep += MICROSTEPS/2
+            else:
+                currentstep -= MICROSTEPS/2
+        if (style == MICROSTEP):
+            if (direction == FORWARD):
+                currentstep++
+            else:
+                # BACKWARDS
+                currentstep--
+
+            currentstep += MICROSTEPS*4
+            currentstep %= MICROSTEPS*4
+
+            ocra = ocrb = 0
+
+            if ( (currentstep >= 0) && (currentstep < MICROSTEPS)):
+                ocra = microstepcurve[MICROSTEPS - currentstep]
+                ocrb = microstepcurve[currentstep]
+            elif ((currentstep >= MICROSTEPS) && (currentstep < MICROSTEPS*2)):
+                ocra = microstepcurve[currentstep - MICROSTEPS]
+                ocrb = microstepcurve[MICROSTEPS*2 - currentstep]
+            elif ((currentstep >= MICROSTEPS*2) && (currentstep < MICROSTEPS*3)):
+                ocra = microstepcurve[MICROSTEPS*3 - currentstep]
+                ocrb = microstepcurve[currentstep - MICROSTEPS*2]
+            elif ((currentstep >= MICROSTEPS*3) && (currentstep < MICROSTEPS*4)):
+                ocra = microstepcurve[currentstep - MICROSTEPS*3]
+                ocrb = microstepcurve[MICROSTEPS*4 - currentstep]
+
+        currentstep += MICROSTEPS*4
+        currentstep %= MICROSTEPS*4
+
+        if (steppernum == 1):
+            setPWM1(ocra)
+            setPWM2(ocrb)
+        elif (steppernum == 2):
+            setPWM3(ocra)
+            setPWM4(ocrb)
+
+
+        # release all
+        latch_state &= ~a & ~b & ~c & ~d; # all motor pins to 0
+
+        if (style == MICROSTEP):
+            if ((currentstep >= 0) && (currentstep < MICROSTEPS)):
+                latch_state |= a | b
+            if ((currentstep >= MICROSTEPS) && (currentstep < MICROSTEPS*2)):
+                latch_state |= b | c
+            if ((currentstep >= MICROSTEPS*2) && (currentstep < MICROSTEPS*3)):
+                latch_state |= c | d
+            if ((currentstep >= MICROSTEPS*3) && (currentstep < MICROSTEPS*4)):
+                latch_state |= d | a
+        else:
+            if (currentstep/(MICROSTEPS/2)==0):
+                latch_state |= a; # energize coil 1 only
+            elif (currentstep/(MICROSTEPS/2)==1):
+                latch_state |= a | b; # energize coil 1+2
+            elif (currentstep/(MICROSTEPS/2)==2):
+                latch_state |= b; # energize coil 2 only
+            elif (currentstep/(MICROSTEPS/2)==3):
+                latch_state |= b | c; # energize coil 2+3
+            elif (currentstep/(MICROSTEPS/2)==4):
+                latch_state |= c; # energize coil 3 only
+            elif (currentstep/(MICROSTEPS/2)==5):
+                latch_state |= c | d; # energize coil 3+4
+            elif (currentstep/(MICROSTEPS/2)==6):
+                latch_state |= d; # energize coil 4 only
+            elif (currentstep/(MICROSTEPS/2)==7):
+                latch_state |= d | a; # energize coil 1+4
+
+        self.latch_tx()
+        return currentstep
+
 
     def release(self):
         if (self.steppernum == 1):
@@ -284,10 +426,7 @@ class AF_Stepper:
         elif (steppernum == 2) :
             # all motor pins to 0
             latch_state &= ~BV(M3['A']) & ~BV(M3['B']) & ~BV(M4['A']) & ~BV(M4['B'])
-        MC.latch_tx()
-
-def getlatchstate():
-    pass
+        self.latch_tx()
 
 def main():
     mot1 = AF_DCMotor(1, 100)
